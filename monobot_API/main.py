@@ -8,7 +8,6 @@ ARDUINO_IP = "monobot.local"  # Replace with your Arduino's IP or mDNS name
 ARDUINO_PORT = 80             # Must match the Arduino server port
 
 # Global variables
-current_key = None       # Currently pressed key
 config_received = False  # Flag indicating that the GO signal has been received
 abort = False            # Flag indicating that the user wants to abort (by pressing Esc)
 
@@ -96,21 +95,6 @@ def wait_for_go():
             pass
         time.sleep(0.01)
 
-def send_command():
-    """
-    Continuously sends the currently pressed key (w, a, or d)
-    to the robot. Commands are only sent after the GO signal has been received.
-    """
-    global current_key
-    while True:
-        if config_received and current_key:
-            try:
-                arduino.sendall(current_key.encode())
-            except (BrokenPipeError, OSError):
-                # Connection lost
-                break
-        time.sleep(0.001)  # Adjust delay for the desired command repetition rate
-
 def read_logs():
     """
     Continuously reads log messages from the robot and prints them to the console.
@@ -135,15 +119,28 @@ def read_logs():
             pass
         time.sleep(0.01)
 
+# ---------------------------
+# KEYBOARD EVENT HANDLING
+# ---------------------------
 def on_press(key):
     """
     Called when a key is pressed.
-    Only the keys 'w', 'a', and 'd' are considered valid commands.
+    Instead of sending 'w', 'a', or 'd' repeatedly, we send numeric states:
+      1 = forward
+      2 = left
+      3 = right
     """
-    global current_key
+    # Only send commands after we have received the GO signal
+    if not config_received:
+        return
+
     try:
-        if key.char in ['w', 'a', 'd']:
-            current_key = key.char
+        if key.char == 'w':
+            arduino.sendall("1\n".encode())  # state 1 = forward
+        elif key.char == 'a':
+            arduino.sendall("2\n".encode())  # state 2 = turn left
+        elif key.char == 'd':
+            arduino.sendall("3\n".encode())  # state 3 = turn right
     except AttributeError:
         # Ignore special keys (e.g., arrow keys, shift, ctrl)
         pass
@@ -151,15 +148,20 @@ def on_press(key):
 def on_release(key):
     """
     Called when a key is released.
-    If a valid command key is released, reset current_key.
+    If one of our movement keys is released, send state=0 (no movement).
     Pressing Esc will close the socket and exit the script.
     """
-    global current_key
-    if hasattr(key, 'char') and key.char in ['w', 'a', 'd']:
-        current_key = None
     if key == keyboard.Key.esc:
         arduino.close()
         return False
+
+    # Only send commands after we have received the GO signal
+    if not config_received:
+        return
+
+    if hasattr(key, 'char') and key.char in ['w', 'a', 'd']:
+        # state 0 = stop
+        arduino.sendall("0\n".encode())
 
 # -----------
 # Main Program Flow
@@ -175,10 +177,8 @@ wait_for_go()
 log_thread = Thread(target=read_logs, daemon=True)
 log_thread.start()
 
-# 4. Start the thread to send commands
-send_thread = Thread(target=send_command, daemon=True)
-send_thread.start()
-
-# 5. Start the keyboard listener
+# 4. Start the keyboard listener (we no longer need
+#    a separate "send_command" thread, as we're sending
+#    states directly on key press/release)
 with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
     listener.join()
