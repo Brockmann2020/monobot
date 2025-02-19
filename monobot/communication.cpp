@@ -67,8 +67,33 @@ char* Communication::recieveData() {
     return nullptr; // Kein neuer Datenempfang
 }
 
-char Communication::recieveDataStream() {
+// Deprecated
+char Communication::recieveDataStream() { 
   return _client.read();
+}
+
+int Communication::receiveState() {
+    if (!isClientAvailable()) {
+        return -1;
+    }
+
+    int lastState = -1;
+    // Read all available data from client
+    while (_client.available()) {
+        // Read one line up to '\n'
+        String line = _client.readStringUntil('\n');
+        line.trim();
+        if (line.length() > 0) {
+            // Attempt to parse it as an integer
+            int parsed = line.toInt();
+            // If parsing failed, toInt() returns 0, but we only accept values 0–3 as valid
+            // (You can expand this check as needed)
+            if (parsed >= 0 && parsed <= 3) {
+                lastState = parsed;
+            }
+        }
+    }
+    return lastState;
 }
 
 void Communication::sendLog(LogMsg logMsg, const Config* config) {
