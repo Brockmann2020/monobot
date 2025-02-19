@@ -21,7 +21,8 @@ public:
   Communication();
   void setupWIFI();
   char* recieveData();
-  char recieveDataStream();
+  char recieveDataStream(); //Deprecated
+  int receiveState();
   void sendLog(LogMsg logMsg, const Config* config);
   void MDNSUpdate();
   bool isClientAvailable();
