@@ -23,17 +23,6 @@ const Config* config = nullptr;
 
 String logMsg = "";
 
-// Function declarations
-int moveForward(int command);
-int turnLeft(int command);
-int turnRight(int command);
-int noMovement(int command);
-int moveDirection(int directionFactor);
-void directionLog(int directionFactor);
-void setGoForLog();
-String decodeState(int s);
-void parseInput(char* input);
-
 void setup() {
     Serial.begin(9600);
     delay(5000);
@@ -69,60 +58,57 @@ void loop() {
     com.MDNSUpdate();
 
     goForLog = false;
-    char command = 0;
     t = millis();
 
-    // Read command from client if available
-    command = com.recieveDataStream();
+    // Read a new state (0,1,2,3) if available
+    int newState = com.receiveState();
+    if (newState != -1) {
+        state = newState;
+        tlastdata = t;
+    }
 
-    logMsg = "state:" + decodeState(state) + 
-             "time: " + String(t) + 
-             ", last data: " + String(tlastdata) + 
-             ", servo angle: " + String(currentAngle) + 
-             ", direction: " + String(dir);
-
-    // Check WiFi command timeout 
+    // Check WiFi command timeout
     if (t - tlastdata >= SERIAL_TIMEOUT) {
+        // If too much time has passed since the last valid state,
+        // assume no movement.
         state = 0;
         dir = 0;
     }
 
-    // Calculate angle
+    // Calculate the servo angle based on the current state
     switch (state) {
         case 1: // forward
-            currentAngle = moveForward(command);
+            currentAngle = moveForward();
             break;
         case 2: // turn left
-            currentAngle = turnLeft(command);
+            currentAngle = turnLeft();
             break;
         case 3: // turn right
-            currentAngle = turnRight(command);
+            currentAngle = turnRight();
             break;
         default:
-            currentAngle = noMovement(command);
+            currentAngle = noMovement();
             break;
     }
+    
+    // Log message for debugging
+    logMsg = "state:" + decodeState(state) +
+             "time: " + String(t) +
+             ", last data: " + String(tlastdata) +
+             ", servo angle: " + String(currentAngle) +
+             ", direction: " + String(dir);
 
     // Send the log if debug is enabled and goForLog is true
     if (com.isClientAvailable() && config->DEBUG && goForLog) {
         com.sendLog(LogMsg(LogLevel::SYSTEM, logMsg), config);
     }
 
+    // Update servo
     servo.write(currentAngle);
 }
 
-// Move forward
-int moveForward(int command) {
-    int servoAngle = currentAngle;
-
-    // Wrong command - no movement
-    if (command != 'w') {
-									  
-        return currentAngle;
-    }
-
-    tlastdata = t;
-
+int moveForward() {
+    // If enough time hasn't passed, do nothing
     if (t - tlastcommand < config->SERVO_DELAY) {
         return currentAngle;
     }
@@ -134,26 +120,34 @@ int moveForward(int command) {
 
     // Move in one direction
     if (dir == 1) {
-        servoAngle += config->SERVO_STEP;
-        if (servoAngle > (config->SERVO_CENTER + config->SERVO_AMPLITUDE_LOW)) {
+        currentAngle += config->SERVO_STEP;
+        if (currentAngle > (config->SERVO_CENTER + config->SERVO_AMPLITUDE_LOW)) {
             dir = 0;
         }
     }
     // Change direction
     else if (dir == 0) {
-        servoAngle -= config->SERVO_STEP;
-        if (servoAngle < (config->SERVO_CENTER - config->SERVO_AMPLITUDE_LOW)) {
+        currentAngle -= config->SERVO_STEP;
+        if (currentAngle < (config->SERVO_CENTER - config->SERVO_AMPLITUDE_LOW)) {
             dir = 1;
         }
     }
 
+    tlastdata = t;
     tlastcommand = t;
-    return servoAngle;
+    return currentAngle;
+}
+
+int turnRight() {
+  return moveDirection(config->TURN_RIGHT);
+}
+
+int turnLeft() {
+    return moveDirection(config->TURN_LEFT);
 }
 
 int moveDirection(int directionFactor) {
-    int servoAngle = currentAngle;
-    tlastdata = t;
+    // directionFactor = config->TURN_LEFT or config->TURN_RIGHT
 
     if (t - tlastcommand < config->SERVO_DELAY) {
         return currentAngle;
@@ -166,22 +160,23 @@ int moveDirection(int directionFactor) {
 
     // Move in the current direction
     if (dir == 1) {
-										
-        servoAngle += servoStepVar * directionFactor;
+        currentAngle += servoStepVar * directionFactor;
         servoStepVar++;
 
         directionLog(directionFactor);
 
         // Check the limit for maximum amplitude
-        if ((directionFactor == config->TURN_RIGHT && servoAngle < (config->SERVO_CENTER - config->SERVO_AMPLITUDE_HIGH)) ||
-            (directionFactor == config->TURN_LEFT  && servoAngle > (config->SERVO_CENTER + config->SERVO_AMPLITUDE_HIGH))) {
-            dir = 0; // Change direction
+        if ((directionFactor == config->TURN_RIGHT &&
+             currentAngle < (config->SERVO_CENTER - config->SERVO_AMPLITUDE_HIGH)) ||
+            (directionFactor == config->TURN_LEFT &&
+             currentAngle > (config->SERVO_CENTER + config->SERVO_AMPLITUDE_HIGH))) {
+            // Change direction
+            dir = 0;
         }
     }
     // Move back towards the center
     else if (dir == 0) {
-									   
-        servoAngle -= directionFactor * servoStepVar;
+        currentAngle -= directionFactor * servoStepVar;
         servoStepVar--;
 
         directionLog(directionFactor);
@@ -190,63 +185,26 @@ int moveDirection(int directionFactor) {
         if (servoStepVar < 2) {
             servoStepVar = 2;
         }
-
         // Change direction once the center is reached
-        if ((directionFactor == config->TURN_RIGHT && servoAngle >= config->SERVO_CENTER) ||
-            (directionFactor == config->TURN_LEFT && servoAngle <= config->SERVO_CENTER)) {
+        if ((directionFactor == config->TURN_RIGHT && currentAngle >= config->SERVO_CENTER) ||
+            (directionFactor == config->TURN_LEFT && currentAngle <= config->SERVO_CENTER)) {
             dir = 1;
             servoStepVar = 1;
         }
     }
 
+    tlastdata = t;
     tlastcommand = t;
-    return servoAngle;
-}
-
-int turnRight(int command) {
-    if (command == 'd') {
-        tlastdata = t;
-        return moveDirection(config->TURN_RIGHT);
-    }
-    return currentAngle;
-}
-
-int turnLeft(int command) {
-    if (command == 'a') {
-        tlastdata = t;
-        return moveDirection(config->TURN_LEFT);
-    }
     return currentAngle;
 }
 
 // No movement
-int noMovement(int command) {
+int noMovement() {
     if (!config->ONLY_LOG_MOVEMENT && (t - lastLogTime >= config->DEBUG_STEP_TIME)) {
         goForLog = true;
         lastLogTime = t;
     }
-
-    switch (command) {
-        case 'w':
-            tlastdata = t;
-            state = 1;
-            break;
-        case 'a':
-            tlastdata = t;
-            dir = 1;
-            servoStepVar = 1;
-            state = 2;
-            break;
-        case 'd':
-            tlastdata = t;
-            dir = 1;
-            servoStepVar = 1;
-            state = 3;
-            break;
-        default:
-            break;
-    }
-  
+    // Return the neutral servo position
     return config->SERVO_CENTER;
 }
 
