@@ -1,0 +1,16 @@
+{
+  "servo_center": 90,
+  "servo_amplitude_low": 20,
+  "servo_amplitude_high": 75,
+  "servo_step": 10,
+  "servo_delay": 20,
+  "turn_left": 1,
+  "turn_right": -1,
+  "twist_compensation" : 1.9,
+
+  "debug": true,
+  "debug_step_time": 500,
+  "only_log_movement": true,
+
+  "log_level": 0
+}
